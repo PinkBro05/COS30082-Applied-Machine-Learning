@@ -1,0 +1,6 @@
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+
+# Ignore all files in Week2/Data folder
+Week2/Data/*
