@@ -1,6 +1,21 @@
-# Ignore compiled Python files
+# Ignore Python bytecode files
 __pycache__/
-*.pyc
+*.py[cod]
 
-# Ignore all files in Week2/Data folder
-Week2/Data/*
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore virtual environment directories
+venv/
+env/
+
+# Ignore data files
+*.csv
+*.h5
+
+# Ignore log files
+*.log
+
+# Ignore system files
+.DS_Store
+Thumbs.db
