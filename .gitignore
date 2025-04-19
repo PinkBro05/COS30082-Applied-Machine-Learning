@@ -22,3 +22,6 @@ Thumbs.db
 
 *.jpg
 *.zip
+
+# Ignore logs file
+*.v2
