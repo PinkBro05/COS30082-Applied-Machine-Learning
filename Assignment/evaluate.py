@@ -169,7 +169,7 @@ def analyze_class_bias(model, test_data_path='Data/test'):
             img_array = img_array / 255.0  # Normalize
             
             # Get prediction
-            predictions = model.predict(img_array, verbose=0)
+            predictions = model.predict(img_array)
             
             # Store prediction and true class
             all_predictions.append(predictions[0])
@@ -251,7 +251,7 @@ def analyze_class_bias(model, test_data_path='Data/test'):
     plt.title('Test Data Class Distribution')
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    plt.savefig('/saved_figures/test_class_distribution.png')
+    plt.savefig('saved_figures/test_class_distribution.png')
     plt.show()
 
 def get_class_names_from_directory(data_path="Data/train"):
