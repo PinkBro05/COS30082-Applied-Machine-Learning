@@ -6,7 +6,7 @@ This project implements and evaluates several deep learning models for multi-cla
 
 ```
 ├── Data/                      # Dataset directory
-│   ├── test/                  # Test dataset with class subfolders
+│   ├── test/                  # Test dataset with class subfolders (1000 images)
 │   │   ├── Amphibia/
 │   │   ├── Animalia/
 │   │   ├── Arachnida/
@@ -17,7 +17,7 @@ This project implements and evaluates several deep learning models for multi-cla
 │   │   ├── Mollusca/
 │   │   ├── Plantae/
 │   │   └── Reptilia/
-│   └── train/                 # Training dataset with class subfolders
+│   └── train/                 # Training dataset with class subfolders (9000 images)
 │       ├── Amphibia/
 │       ├── Animalia/
 │       └── ...                # Same class structure as test

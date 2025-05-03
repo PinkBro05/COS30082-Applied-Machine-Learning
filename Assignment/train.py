@@ -143,7 +143,7 @@ def train_model(
         loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
-    
+
     # Train the model
     print(f"\nTraining {model_name} for {epochs} epochs...")
     history = model.fit(
