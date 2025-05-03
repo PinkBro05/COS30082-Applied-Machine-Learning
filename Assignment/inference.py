@@ -8,7 +8,7 @@ import os
 
 from models import ResNet50Model, ResNetCustom, BasicCNN
 
-def predict_single_image(model, image_path, class_names):
+def predict_single_image(model, image_path, class_names, model_type='resnet50'):
     """
     Make a prediction on a single image
     
@@ -16,15 +16,26 @@ def predict_single_image(model, image_path, class_names):
         model: Loaded Keras model
         image_path: Path to the image file
         class_names: List of class names
+        model_type: Type of model ('resnet50', 'resnet_custom', or 'basic_cnn')
     """
     # Load and preprocess the image
     img = tf.keras.preprocessing.image.load_img(image_path, target_size=(224, 224))
     img_array = tf.keras.preprocessing.image.img_to_array(img)
     img_array = tf.expand_dims(img_array, axis=0)  # Add batch dimension
-    img_array = img_array / 255.0  # Normalize the image
+    
+    # Apply appropriate preprocessing based on model type
+    if model_type in ['resnet50', 'resnet_custom']:
+        # Use ResNet-specific preprocessing
+        img_array = tf.keras.applications.resnet50.preprocess_input(img_array)
+        print("Using ResNet preprocessing")
+    else:
+        # Standard normalization for other models
+        img_array = img_array / 255.0
+        print("Using standard normalization (/255)")
     
     # Make prediction
     predictions = model.predict(img_array)
+    
     predicted_class = tf.argmax(predictions, axis=1).numpy()[0]
     confidence = float(predictions[0, predicted_class])
     
@@ -182,7 +193,7 @@ def main():
     print(f"Actual class: {class_name}")
     
     # Make prediction
-    result = predict_single_image(model, image_path, class_names)
+    result = predict_single_image(model, image_path, class_names, model_type=args.model_type)
     
     # Print results
     print(f"Predicted class: {result['class']}")
