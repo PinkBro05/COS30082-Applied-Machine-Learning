@@ -10,29 +10,30 @@ class ResNet50Model(BaseModel):
         super().__init__(input_shape, num_classes)
         self.weights = weights
         self.include_top = include_top
+        self.base_model = None
     
     def build(self):
         """Build the ResNet50 model architecture"""
         # Load the ResNet50 base model
-        base_model = ResNet50(
+        self.base_model = ResNet50(
             weights=self.weights,
             include_top=self.include_top,
             input_shape=self.input_shape
         )
         
         # Freeze the base model layers
-        for layer in base_model.layers:
+        for layer in self.base_model.layers:
             layer.trainable = False
         
         # Add custom layers on top
-        x = base_model.output
+        x = self.base_model.output
         x = layers.GlobalAveragePooling2D()(x)
         x = layers.Dense(512, activation='relu')(x)
         x = layers.Dropout(0.5)(x)
         outputs = layers.Dense(self.num_classes, activation='softmax')(x)
         
         # Create the model
-        self.model = models.Model(inputs=base_model.input, outputs=outputs, name="ResNet50Finetuned")
+        self.model = models.Model(inputs=self.base_model.input, outputs=outputs, name="ResNet50Finetuned")
         return self.model
     
     def unfreeze_layers(self, num_layers=10):
@@ -46,7 +47,7 @@ class ResNet50Model(BaseModel):
             raise ValueError("Model not built yet. Call build() first.")
         
         # Find ResNet layers to unfreeze
-        for layer in self.model.layers[0].layers[-num_layers:]:
+        for layer in self.base_model.layers[-num_layers:]:
             layer.trainable = True
             
         print(f"Unfrozen the last {num_layers} layers of the base model for fine-tuning")

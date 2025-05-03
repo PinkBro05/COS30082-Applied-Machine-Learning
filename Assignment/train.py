@@ -192,7 +192,7 @@ def plot_training_history(history, model_name):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig(f'/saved_figures/{model_name}_training_history.png')
+    plt.savefig(f'saved_figures/{model_name}_training_history.png')
     plt.show()
 
 def main():
