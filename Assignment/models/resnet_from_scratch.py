@@ -21,8 +21,10 @@ class ResidualBlock(layers.Layer):
         # Shortcut connection
         if stride != 1:
             self.shortcut = layers.Conv2D(filters, (1, 1), strides=stride, padding='same')
+            self.bn3 = layers.BatchNormalization()
         else:
             self.shortcut = lambda x: x
+            self.bn3 = lambda x: x
             
     def get_config(self):
         config = super().get_config()
@@ -42,7 +44,25 @@ class ResidualBlock(layers.Layer):
         x = self.conv2(x)
         x = self.bn2(x)
         x += shortcut
+        x = self.bn3(x)
         return self.activation(x)
+    
+def residual_block(filters, kernel_size=3, stride=1, activation='relu', name=None):
+    def block(x):
+        shortcut = x
+        x = layers.Conv2D(filters, kernel_size, strides=stride, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Activation(activation)(x)
+        x = layers.Conv2D(filters, kernel_size, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        
+        if stride != 1:
+            shortcut = layers.Conv2D(filters, (1, 1), strides=stride, padding='same')(shortcut)
+            shortcut = layers.BatchNormalization()(shortcut)
+        
+        x += shortcut
+        return layers.Activation(activation)(x)
+    return block
 
 class ResNet:
     def __init__(self, input_shape, num_classes):
@@ -54,25 +74,25 @@ class ResNet:
         self.model.add(layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same'))
         
         # Residual Blocks
-        self.model.add(ResidualBlock(64))
-        self.model.add(ResidualBlock(64))
-        self.model.add(ResidualBlock(64))
+        self.model.add(residual_block(64))
+        self.model.add(residual_block(64))
+        self.model.add(residual_block(64))
         
-        self.model.add(ResidualBlock(128, stride=2))
-        self.model.add(ResidualBlock(128))
-        self.model.add(ResidualBlock(128))
-        self.model.add(ResidualBlock(128))
+        self.model.add(residual_block(128, stride=2))
+        self.model.add(residual_block(128))
+        self.model.add(residual_block(128))
+        self.model.add(residual_block(128))
         
-        self.model.add(ResidualBlock(256, stride=2))
-        self.model.add(ResidualBlock(256))
-        self.model.add(ResidualBlock(256))
-        self.model.add(ResidualBlock(256))
-        self.model.add(ResidualBlock(256))
-        self.model.add(ResidualBlock(256))
+        self.model.add(residual_block(256, stride=2))
+        self.model.add(residual_block(256))
+        self.model.add(residual_block(256))
+        self.model.add(residual_block(256))
+        self.model.add(residual_block(256))
+        self.model.add(residual_block(256))
         
-        self.model.add(ResidualBlock(512, stride=2))
-        self.model.add(ResidualBlock(512))
-        self.model.add(ResidualBlock(512))
+        self.model.add(residual_block(512, stride=2))
+        self.model.add(residual_block(512))
+        self.model.add(residual_block(512))
                             
         # Final Layers
         self.model.add(layers.GlobalAveragePooling2D())
