@@ -8,7 +8,7 @@ from tensorflow.keras.layers import Dense, Flatten, Dropout
 from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
 
-from data_collector import Datacollector
+from ultis.data_collector import Datacollector
 
 def main():
     # Set the path to the dataset directory

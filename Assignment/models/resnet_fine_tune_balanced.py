@@ -9,7 +9,7 @@ from tensorflow.keras.layers import Dense, Flatten, Dropout
 from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
-from data_collector import Datacollector
+from ultis.data_collector import Datacollector
 
 def compute_class_weights(train_data):
     """Compute class weights to balance training"""

@@ -2,10 +2,10 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, classification_report
 import os
 
-from data_collector import Datacollector
+from ultis.data_collector import Datacollector
 
 def evaluate_model(model_path, test_data_path='Data/test'):
     """
@@ -89,6 +89,10 @@ def evaluate_model(model_path, test_data_path='Data/test'):
         confusion_matrix=cm
     )
     
+    # Classification report
+    print("\nClassification Report:")
+    print(classification_report(all_true_labels, all_predictions, target_names=class_names))
+    
     return {
         'top1_accuracy': top1_accuracy,
         'per_class_accuracy': per_class_accuracy,
@@ -154,6 +158,9 @@ def main():
     # Evaluate the model
     print(f"Evaluating model: {model_path}")
     results = evaluate_model(model_path)
+    
+    # Report results
+    print("\nEvaluation Results:")    
     
 if __name__ == "__main__":
     main()

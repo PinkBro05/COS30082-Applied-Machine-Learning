@@ -1,5 +1,5 @@
-from data_collector import Datacollector
-from resnet_from_scratch import ResidualBlock
+from ultis.data_collector import Datacollector
+from models.resnet_from_scratch import ResidualBlock
 
 import tensorflow as tf
 import keras

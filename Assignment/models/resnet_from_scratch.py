@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import  layers, models
 import matplotlib.pyplot as plt
 
-from data_collector import Datacollector
+from ultis.data_collector import Datacollector
 
 class ResidualBlock(layers.Layer):
     def __init__(self, filters, kernel_size=3, stride=1, activation='relu', name=None, **kwargs):

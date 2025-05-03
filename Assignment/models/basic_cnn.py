@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import  layers, models
 import matplotlib.pyplot as plt
 
-from data_collector import Datacollector
+from ultis.data_collector import Datacollector
 
 class BasicCNN:
     def __init__(self, input_shape, num_classes):
