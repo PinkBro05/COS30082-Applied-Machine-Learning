@@ -18,6 +18,7 @@ known_face_encodings = [
     pink_face_encoding,
     faker_face_encoding
 ]
+
 known_face_names = [
     "Ho Chi Minh",
     "Pink",
