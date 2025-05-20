@@ -55,9 +55,9 @@ class ResNetCustom(BaseModel):
         """Build the ResNet model architecture"""
         inputs = layers.Input(shape=self.input_shape)
         
-        # Initial Conv Layer
-        x = layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same', activation='relu')(inputs)
-        x = layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(x)
+        # Initial Conv Layer / strides = (1, 1) isntead of (2, 2) since the input size is small
+        x = layers.Conv2D(64, (7, 7), strides=(1, 1), padding='same', activation='relu')(inputs) 
+        x = layers.MaxPooling2D((3, 3), strides=(1, 1), padding='same')(x)
         
         # Residual Blocks
         # Stage 1

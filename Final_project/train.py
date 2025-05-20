@@ -3,11 +3,64 @@ import tensorflow as tf
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.utils.class_weight import compute_class_weight
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+import math
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, Callback
 
 from utils.data_collector import Datacollector
 from models import ResNetCustom
+
+class WarmupCosineDecayScheduler(Callback):
+    """
+    Cosine decay learning rate scheduler with linear warmup.
+    
+    This callback gradually increases the learning rate from 0 to the base learning rate
+    over the warmup period, then applies cosine decay from the base learning rate to 0
+    over the remaining epochs.
+    
+    Args:
+        base_lr: Base learning rate after warmup.
+        total_epochs: Total number of training epochs.
+        warmup_epochs: Number of warmup epochs (default=1).
+        verbose: Whether to print learning rate updates (0=silent, 1=update messages).
+    """
+    def __init__(self, base_lr, total_epochs, warmup_epochs=1, verbose=1):
+        super(WarmupCosineDecayScheduler, self).__init__()
+        self.base_lr = base_lr
+        self.total_epochs = total_epochs
+        self.warmup_epochs = warmup_epochs
+        self.verbose = verbose
+        self.learning_rates = []
+        
+    def on_epoch_begin(self, epoch, logs=None):
+        if epoch < self.warmup_epochs:
+            # Linear warmup phase
+            lr = self.base_lr * ((epoch + 1) / self.warmup_epochs)
+        else:
+            # Cosine decay phase with minimum learning rate
+            progress = (epoch - self.warmup_epochs) / (self.total_epochs - self.warmup_epochs)
+            # Ensure the learning rate decays all the way to a very small value by the last epoch
+            lr = self.base_lr * 0.5 * (1 + math.cos(math.pi * progress))
+            
+            # Add a small minimum value to avoid exactly zero
+            min_lr = 1e-6  # Small minimum learning rate
+            lr = max(lr, min_lr)
+        
+        # Set the learning rate
+        tf.keras.backend.set_value(self.model.optimizer.lr, lr)
+        self.learning_rates.append(lr)
+        
+        if self.verbose > 0:
+            print(f"\nEpoch {epoch+1}: Learning rate set to {lr:.6f}")
+            
+    def plot_lr_schedule(self):
+        """Plot the learning rate schedule"""
+        plt.figure(figsize=(10, 4))
+        plt.plot(range(1, len(self.learning_rates) + 1), self.learning_rates, marker='o')
+        plt.xlabel('Epoch')
+        plt.ylabel('Learning Rate')
+        plt.title('Learning Rate Schedule')
+        plt.grid(True)
+        plt.show()
 
 def train_model(
     model_id,
@@ -15,7 +68,7 @@ def train_model(
     val_data,
     test_data,
     class_names,
-    epochs=60,
+    epochs=30,
     learning_rate=0.001,
     output_dir='saved_models',
 ):
@@ -52,14 +105,22 @@ def train_model(
     
     # Display model summary
     model.summary()
-    
-    # Define callbacks
+      # Define callbacks
     model_name = f"{model_id}_model"
+    
+    # Create the learning rate scheduler with warmup and cosine decay
+    lr_scheduler = WarmupCosineDecayScheduler(
+        base_lr=learning_rate,
+        total_epochs=epochs,
+        warmup_epochs=1,  # 1 epoch of warmup
+        verbose=1
+    )
+    
     callbacks = [
         # Early stopping to prevent overfitting
         EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=3,
             verbose=1,
             restore_best_weights=True
         ),
@@ -73,23 +134,21 @@ def train_model(
             mode='max'
         ),
         
-        # Reduce learning rate when a metric has stopped improving
-        ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=5,
-            min_lr=1e-6,
-            verbose=1
-        ),
+        # Add our custom LR scheduler
+        lr_scheduler
     ]
     
-    # Compile the model
+    # Compile the model with a fixed initial learning rate
+    # The scheduler will handle dynamic learning rate changes
     model.compile(
-        optimizer=tf.keras.optimizers.Adadelta(learning_rate=learning_rate),
+        optimizer=tf.keras.optimizers.SGD(learning_rate=0.0,  # Initial LR will be set by scheduler
+                                          momentum=0.9,
+                                          decay=5e-4,
+                                          ),
         loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
-    )
-
+    )    
+    
     # Train the model
     print(f"\nTraining {model_name} for {epochs} epochs...")
     history = model.fit(
@@ -109,8 +168,21 @@ def train_model(
     test_loss, test_accuracy = model.evaluate(test_data)
     print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
     
-    # Plot training history
+    # Plot training history and learning rate schedule
     plot_training_history(history, model_name)
+    
+    # Plot the learning rate schedule
+    for callback in callbacks:
+        if isinstance(callback, WarmupCosineDecayScheduler):
+            plt.figure(figsize=(10, 4))
+            plt.plot(range(1, len(callback.learning_rates) + 1), callback.learning_rates, marker='o')
+            plt.xlabel('Epoch')
+            plt.ylabel('Learning Rate')
+            plt.title('Learning Rate Schedule')
+            plt.grid(True)
+            plt.savefig(f'saved_figures/{model_name}_lr_schedule.png')
+            plt.show()
+            break
     
     return model, history
 
@@ -144,11 +216,11 @@ def main():
     parser = argparse.ArgumentParser(description='Train image classification models')
     parser.add_argument('--model_id', type=str, default='test',
                         help='Model ID for saving the model')
-    parser.add_argument('--epochs', type=int, default=60, 
+    parser.add_argument('--epochs', type=int, default=30, 
                         help='Number of epochs to train')
     parser.add_argument('--learning_rate', type=float, default=0.001, 
                         help='Learning rate')
-    parser.add_argument('--batch_size', type=int, default=32, 
+    parser.add_argument('--batch_size', type=int, default=256, 
                         help='Batch size')
     parser.add_argument('--train_path', type=str, default='data/classification_data/train_data', 
                         help='Path to training data directory')
@@ -168,7 +240,7 @@ def main():
     )
     
     # Load the classification data
-    train_ds, val_ds, test_ds = data.load_data()
+    train_ds, val_ds, test_ds = data.load_data(batch_size=args.batch_size)
     
     # Get class names from the loaded data
     class_names = data.get_class_names()
@@ -186,7 +258,8 @@ def main():
         test_data=test_ds,
         class_names=class_names,
         epochs=args.epochs,
-        learning_rate=args.learning_rate,
+        # learning_rate=args.learning_rate,
+        learning_rate= 0.2*(args.batch_size/512),
         output_dir=args.output_dir,
     )
     
