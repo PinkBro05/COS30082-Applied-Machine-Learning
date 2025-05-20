@@ -51,7 +51,7 @@ class ResNetCustom(BaseModel):
     def __init__(self, input_shape=(64, 64, 3), num_classes=10):
         super().__init__(input_shape, num_classes)
         
-    def build(self):
+    def build(self, is_inference=False):
         """Build the ResNet model architecture"""
         inputs = layers.Input(shape=self.input_shape)
         
@@ -81,7 +81,11 @@ class ResNetCustom(BaseModel):
         
         # Final Layers
         x = layers.GlobalAveragePooling2D()(x)
-        outputs = layers.Dense(self.num_classes, activation='softmax')(x)
+        outputs = layers.Dense(self.num_classes)(x)
+        
+        # If not inference, apply softmax activation else return logits as face embedding
+        if not is_inference:
+            outputs = layers.Activation('softmax')(outputs)
         
         # Create model
         self.model = models.Model(inputs=inputs, outputs=outputs, name="ResNetCustom")
