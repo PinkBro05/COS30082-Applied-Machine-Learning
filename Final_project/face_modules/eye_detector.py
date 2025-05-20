@@ -4,9 +4,9 @@ Provides functionality for eye blink detection and other eye-related features.
 """
 
 import numpy as np
-from .face_detector import landmark_predictor
-from .utils.math_utils import eye_aspect_ratio
-from .config import LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS, EYE_ASPECT_RATIO_THRESHOLD
+from face_modules.face_detector import landmark_predictor
+from face_modules.utils.math_utils import eye_aspect_ratio
+from face_modules.config import LEFT_EYE_LANDMARKS, RIGHT_EYE_LANDMARKS, EYE_ASPECT_RATIO_THRESHOLD
 
 def get_eye_landmarks(image, face_detection):
     """

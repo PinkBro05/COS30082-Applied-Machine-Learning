@@ -3,11 +3,10 @@ Face-based check-in system module.
 Integrates face detection, eye analysis, and face recognition for a complete check-in system.
 """
 
-import gradio as gr
 import numpy as np
-from .face_detector import detect_faces, get_face_bbox
-from .eye_detector import check_eye_status
-from .face_recognition import get_face_embedding, recognize_face, register_new_face
+from face_modules.face_detector import detect_faces, get_face_bbox
+from face_modules.eye_detector import check_eye_status
+from face_modules.face_recognition import get_face_embedding, recognize_face, register_new_face
 
 def process_check_in(image, state):
     """
@@ -23,7 +22,9 @@ def process_check_in(image, state):
         Tuple of (eye_result, recognition_result, check_in_result, annotated_image, updated_state)
     """
     if image is None:
-        raise gr.Error("Press recording before checkin")
+        # Create a blank image instead of None to avoid AnnotatedImage error
+        blank_image = np.ones((480, 640, 3), dtype=np.uint8) * 255
+        return "", "Press recording before checkin", "", (blank_image, []), state
 
     # Detect faces in the image
     face_detections = detect_faces(image, upsample_num_times=2)
@@ -110,10 +111,12 @@ def process_registration(image, name):
         Tuple of (registration_result, annotated_image)
     """
     if image is None:
-        raise gr.Error("Press recording before registering")
+        # Create a blank image instead of None to avoid AnnotatedImage error
+        blank_image = np.ones((480, 640, 3), dtype=np.uint8) * 255
+        return "Press recording before registering", (blank_image, [])
         
     if not name:
-        raise gr.Error("Please enter a name before registering")
+        return "Please enter a name before registering", (image, [])
     
     # Detect faces in the image
     face_detections = detect_faces(image, upsample_num_times=1)

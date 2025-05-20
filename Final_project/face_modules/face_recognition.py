@@ -4,11 +4,11 @@ Provides functionality for recognizing faces using embeddings.
 """
 
 import numpy as np
-import keras
-import gradio as gr
+import tensorflow as tf
+from tensorflow import keras
 import os
-from .utils.math_utils import distance
-from .config import (
+from face_modules.utils.math_utils import distance
+from face_modules.config import (
     FACE_EMBEDDING_MODEL_PATH, 
     FACE_RECOGNITION_THRESHOLD,
     EMBEDDINGS_FILE,
@@ -80,7 +80,8 @@ def recognize_face(face_embedding):
             names = f.read().splitlines()
 
     except FileNotFoundError:
-        raise gr.Error("No faces registered. Please register a face before checking-in")
+        print("No stored embeddings or names found.")
+        return False, "", float('inf')
 
     # Compare with stored embeddings
     distances = np.array([distance(face_embedding, emb) for emb in embeddings])

@@ -5,7 +5,7 @@ Provides functionality for detecting faces in images using dlib.
 
 import dlib
 import numpy as np
-from ..config import LANDMARK_PREDICTOR_PATH
+from face_modules.config import LANDMARK_PREDICTOR_PATH
 
 # Initialize the face detector and landmark predictor once
 detector = dlib.get_frontal_face_detector()  # type: ignore
