@@ -69,9 +69,9 @@ def process_check_in(image, state):
     # Handle recognized face
     if face_min_name == state["last_face"]:
         state["taken_actions"].add(eye_action)
-        
-        # Check if both eye states have been observed (blink detection)
+          # Check if both eye states have been observed (blink detection)
         if len(state["taken_actions"]) == 2:
+            # Anti-spoofing passed - show the name
             return (
                 f"{eye_action}. Ratio: {ear}",
                 f"Recognized {face_min_name}. Distance: {face_min_distance}",
@@ -80,22 +80,22 @@ def process_check_in(image, state):
                 state
             )
         else:
+            # Anti-spoofing not yet passed - don't show the name
             return (
                 f"{eye_action}. Ratio: {ear}",
-                f"Recognized {face_min_name}. Distance: {face_min_distance}",
+                f"Person detected. Distance: {face_min_distance}",
                 f"Waiting for eye action",
-                (image, [(face_boundary, f"{face_min_name}")]),
+                (image, [(face_boundary, f"Verification required")]),
                 state
             )
-    else:
-        # New face detected, reset state
+    else:        # New face detected, reset state
         state["taken_actions"] = {eye_action}
         state["last_face"] = face_min_name
         return (
             f"{eye_action}. Ratio: {ear}",
-            f"Recognized {face_min_name}. Distance: {face_min_distance}",
+            f"Person detected. Distance: {face_min_distance}",
             f"Waiting for eye action",
-            (image, [(face_boundary, f"{face_min_name}")]),
+            (image, [(face_boundary, f"Verification required")]),
             state
         )
 
@@ -110,13 +110,6 @@ def process_registration(image, name):
     Returns:
         Tuple of (registration_result, annotated_image)
     """
-    if image is None:
-        # Create a blank image instead of None to avoid AnnotatedImage error
-        blank_image = np.ones((480, 640, 3), dtype=np.uint8) * 255
-        return "Press recording before registering", (blank_image, [])
-        
-    if not name:
-        return "Please enter a name before registering", (image, [])
     
     # Detect faces in the image
     face_detections = detect_faces(image, upsample_num_times=1)

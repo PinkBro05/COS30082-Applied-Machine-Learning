@@ -153,7 +153,7 @@ class FaceRecognitionApp:
                     break
                     
                 print(f"Trying camera with backend {backend}...")
-                self.cap = cv2.VideoCapture(0, backend)
+                self.cap = cv2.VideoCapture(1, backend)
                 time.sleep(1.0)  # Wait for camera initialization
             
             # Check if camera opened successfully
@@ -262,7 +262,7 @@ class FaceRecognitionApp:
                 self.root.after(0, self.display_frame, self.frame, sections)
                 
                 # Sleep to control frame rate
-                time.sleep(0.033)  # ~30 FPS
+                # time.sleep(0.033)  # ~30 FPS
                 
         except Exception as e:
             self.root.after(0, self.show_error, f"Camera error: {str(e)}")
