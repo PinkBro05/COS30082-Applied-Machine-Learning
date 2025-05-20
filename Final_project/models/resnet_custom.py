@@ -48,7 +48,7 @@ class ResidualBlock(layers.Layer):
 class ResNetCustom(BaseModel):
     """Custom implementation of ResNet architecture"""
     
-    def __init__(self, input_shape=(224, 224, 3), num_classes=10):
+    def __init__(self, input_shape=(64, 64, 3), num_classes=10):
         super().__init__(input_shape, num_classes)
         
     def build(self):
