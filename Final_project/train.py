@@ -64,6 +64,7 @@ class WarmupCosineDecayScheduler(Callback):
 
 def train_model(
     model_id,
+    is_arcface,
     train_data,
     val_data,
     test_data,
@@ -101,7 +102,7 @@ def train_model(
     
     
     model = ResNetCustom(input_shape=input_shape, num_classes=num_classes)
-    model.build()
+    model.build(is_acrf=is_arcface)
     
     # Display model summary
     model.summary()
@@ -120,7 +121,7 @@ def train_model(
         # Early stopping to prevent overfitting
         EarlyStopping(
             monitor='val_loss',
-            patience=3,
+            patience=10,
             verbose=1,
             restore_best_weights=True
         ),
@@ -216,12 +217,14 @@ def main():
     parser = argparse.ArgumentParser(description='Train image classification models')
     parser.add_argument('--model_id', type=str, default='test',
                         help='Model ID for saving the model')
-    parser.add_argument('--epochs', type=int, default=30, 
+    parser.add_argument('--epochs', type=int, default=100, 
                         help='Number of epochs to train')
     parser.add_argument('--learning_rate', type=float, default=0.001, 
                         help='Learning rate')
-    parser.add_argument('--batch_size', type=int, default=256, 
+    parser.add_argument('--batch_size', type=int, default=512, 
                         help='Batch size')
+    parser.add_argument('--use_arcface', default=False, type=bool,
+                        help='Use ArcFace format for data')
     parser.add_argument('--train_path', type=str, default='data/classification_data/train_data', 
                         help='Path to training data directory')
     parser.add_argument('--val_path', type=str, default='data/classification_data/val_data',
@@ -232,15 +235,19 @@ def main():
                         help='Directory to save model and checkpoints')
     
     args = parser.parse_args()
-      # Initialize DataCollector and load data
+    
+    # Initialize DataCollector and load data
     data = Datacollector(
         train_path=args.train_path,
         val_path=args.val_path,
         test_path=args.test_path
     )
     
-    # Load the classification data
-    train_ds, val_ds, test_ds = data.load_data(batch_size=args.batch_size)
+    # Load the classification data with ArcFace format enabled
+    train_ds, val_ds, test_ds = data.load_data(
+        batch_size=args.batch_size,
+        use_arcface=args.use_arcface  # Enable ArcFace format
+    )
     
     # Get class names from the loaded data
     class_names = data.get_class_names()
@@ -252,6 +259,7 @@ def main():
     
     # Train the model
     train_model(
+        is_arcface=args.use_arcface,
         model_id=args.model_id,
         train_data=train_ds,
         val_data=val_ds,
@@ -259,7 +267,7 @@ def main():
         class_names=class_names,
         epochs=args.epochs,
         # learning_rate=args.learning_rate,
-        learning_rate= 0.2*(args.batch_size/512),
+        learning_rate= 0.05*(args.batch_size/512),
         output_dir=args.output_dir,
     )
     

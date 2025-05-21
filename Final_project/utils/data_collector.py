@@ -16,7 +16,7 @@ class Datacollector:
         self.val_ds = None
         self.test_ds = None
             
-    def load_data(self, batch_size=32, img_height=64, img_width=64, use_resnet_preprocessing=True):
+    def load_data(self, batch_size=32, img_height=64, img_width=64, use_resnet_preprocessing=True, use_arcface=False):
         """Load data from classification_data folder structure"""
         print("Loading classification data...")
         
@@ -55,30 +55,60 @@ class Datacollector:
             
             def process_data(images, labels):
                 return preprocess_input(images), labels
-                
-            processed_train_ds = self.train_ds.map(
-                lambda x, y: (data_augmentation(x, training=True), y)
-            ).map(process_data)
             
-            processed_val_ds = self.val_ds.map(process_data)
-            processed_test_ds = self.test_ds.map(process_data)
+            if use_arcface:
+                # For ArcFace - need to return images and labels as separate inputs
+                def process_arcface_data(images, labels):
+                    processed_images = preprocess_input(images)
+                    return {'input_1': processed_images, 'label_input': labels}, labels
+                
+                processed_train_ds = self.train_ds.map(
+                    lambda x, y: (data_augmentation(x, training=True), y)
+                ).map(process_arcface_data)
+                
+                processed_val_ds = self.val_ds.map(process_arcface_data)
+                processed_test_ds = self.test_ds.map(process_arcface_data)
+                
+            else:
+                # Standard processing
+                processed_train_ds = self.train_ds.map(
+                    lambda x, y: (data_augmentation(x, training=True), y)
+                ).map(process_data)
+                
+                processed_val_ds = self.val_ds.map(process_data)
+                processed_test_ds = self.test_ds.map(process_data)
             
         else:
             # Standard normalization (0-1)
             print("Using standard normalization (0-1)")
             normalization_layer = tf.keras.layers.Rescaling(1./255)
             
-            processed_train_ds = self.train_ds.map(
-                lambda x, y: (data_augmentation(x, training=True), y)
-            ).map(lambda x, y: (normalization_layer(x), y))
+            if use_arcface:
+                # For ArcFace - need to return images and labels as separate inputs
+                def process_arcface_norm_data(images, labels):
+                    normalized_images = normalization_layer(images)
+                    return {'input_1': normalized_images, 'label_input': labels}, labels
+                
+                processed_train_ds = self.train_ds.map(
+                    lambda x, y: (data_augmentation(x, training=True), y)
+                ).map(process_arcface_norm_data)
+                
+                processed_val_ds = self.val_ds.map(process_arcface_norm_data)
+                processed_test_ds = self.test_ds.map(process_arcface_norm_data)
             
-            processed_val_ds = self.val_ds.map(
-                lambda x, y: (normalization_layer(x), y)
-            )
-            
-            processed_test_ds = self.test_ds.map(
-                lambda x, y: (normalization_layer(x), y)
-            )
+            else:
+                # Standard processing 
+                processed_train_ds = self.train_ds.map(
+                    lambda x, y: (data_augmentation(x, training=True), y)
+                ).map(lambda x, y: (normalization_layer(x), y))
+                
+                processed_val_ds = self.val_ds.map(
+                    lambda x, y: (normalization_layer(x), y)
+                )
+                
+                processed_test_ds = self.test_ds.map(
+                    lambda x, y: (normalization_layer(x), y)
+                )
         
         # Configure datasets for performance
         AUTOTUNE = tf.data.AUTOTUNE
