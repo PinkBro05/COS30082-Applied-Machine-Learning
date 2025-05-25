@@ -72,82 +72,44 @@ python main.py
 
 ### Model Training
 
-#### Supervised Learning (Classification)
+Training is performed using the Jupyter Notebook `train.ipynb`. Open this notebook to:
 
-Train a ResNet model for face classification:
+1. Train a ResNet model for face classification with supervised learning
+2. Use ArcFace loss for improved face recognition
+3. Implement metric learning with triplet loss using sliding window strategy
 
-```bash
-python train.py --model_id my_resnet --training_mode supervised --epochs 50 --learning_rate 0.001 --batch_size 32
-```
+#### Training Options
 
-With ArcFace loss (recommended for face recognition):
+The notebook provides options for:
 
-```bash
-python train.py --model_id arcface_resnet --training_mode supervised --use_arcface --epochs 50 --learning_rate 0.001
-```
+- **Model Identifier**: Name for saving your trained model
+- **Training Mode**: Choose between 'supervised' or 'metric_learning'
+- **ArcFace**: Enable/disable ArcFace head for supervised training
+- **Hyperparameters**: Configure epochs, learning rate, batch size
+- **Data Paths**: Specify training, validation, and test data locations
 
-#### Metric Learning (Triplet Loss)
-
-Train using triplet loss with sliding window strategy:
-
-```bash
-python train.py --model_id metric_resnet --training_mode metric_learning --epochs 50 --batch_size 32
-```
-
-#### Training Parameters
-
-- `--model_id`: Identifier for the model (used for saving)
-- `--training_mode`: Choose between 'supervised' or 'metric_learning'
-- `--use_arcface`: Use ArcFace head (only for supervised mode)
-- `--epochs`: Number of training epochs (default: 50)
-- `--learning_rate`: Base learning rate (default: 0.001)
-- `--batch_size`: Batch size for training (default: 32)
-- `--train_path`: Path to training data (default: 'data/classification_data/train_data')
-- `--val_path`: Path to validation data (default: 'data/classification_data/val_data')
-- `--test_path`: Path to test data (default: 'data/classification_data/test_data')
+Run all cells in the notebook to train and save your model to the `model_factory/` directory.
 
 ### Model Evaluation
 
-#### Test Set Evaluation
+Model evaluation is integrated into the `train.ipynb` notebook, where you can:
 
-Evaluate a trained model on the test set:
+- **Test Set Evaluation**: Evaluate a trained model on the test set
+- **Sample Inference**: Visualize predictions on random samples
+- **Face Verification**: Analyze ROC curves and verification performance
 
-```bash
-python inference.py --mode test --model_path model_factory/best_my_resnet_supervised_model.h5
-```
-
-#### Single Sample Inference
-
-Perform inference on random samples:
-
-```bash
-python inference.py --mode inference --model_path model_factory/best_my_resnet_supervised_model.h5 --num_samples 5
-```
-
-#### Face Verification (ROC Analysis)
-
-Evaluate face verification performance:
-
-```bash
-python inference.py --mode face_verification --model_path model_factory/best_my_resnet_supervised_model.h5 --verification_pairs data/verification_pairs_test.txt
-```
-
-#### Evaluation Parameters
-
-- `--mode`: Choose between 'test', 'inference', or 'face_verification'
-- `--model_path`: Path to the trained model file (.h5)
-- `--test_path`: Path to test data directory
-- `--verification_path`: Path to verification data directory
-- `--verification_pairs`: Path to verification pairs file
-- `--num_samples`: Number of samples for inference mode
+The notebook automatically generates evaluation metrics and visualizations in the `saved_figures/` directory, including:
+- Classification metrics (accuracy, precision, recall, F1-score)
+- ROC curves and AUC scores for face verification
+- Confusion matrices
+- Training history plots
 
 ## Project Structure
 
 ```
 Final_project/
 ├── main.py                     # GUI application entry point
-├── train.py                    # Model training script
-├── inference.py                # Model evaluation and inference script
+├── train.ipynb                 # Jupyter notebook for model training and evaluation
 ├── README.md                   # This file
 ├── face_modules/               # Core modules for face processing
 │   ├── face_detector.py        # Face detection using dlib
@@ -156,11 +118,7 @@ Final_project/
 │   ├── check_in_system.py      # Integration of all modules for check-in workflow
 │   ├── config.py               # Configuration settings
 │   └── utils/                  # Utility functions for face analysis
-├── models/                     # Neural network model implementations
-│   ├── base_model.py           # Base model class
-│   └── resnet_custom.py        # Custom ResNet with metric learning support
 ├── utils/                      # Data processing utilities
-│   ├── data_collector.py       # Data loading and preprocessing
 │   └── indexer_algos.py        # Algorithm utilities
 ├── data/                       # Dataset storage
 │   ├── classification_data/    # Training data (train/val/test splits)
