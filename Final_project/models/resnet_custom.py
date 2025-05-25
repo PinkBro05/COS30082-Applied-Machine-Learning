@@ -1,7 +1,43 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
+import numpy as np
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
 from models.base_model import BaseModel
 
+# Triplet Loss Layer for Metric Learning
+class TripletLossLayer(layers.Layer):
+    def __init__(self, margin=0.5, name=None, **kwargs):
+        super(TripletLossLayer, self).__init__(name=name, **kwargs)
+        self.margin = margin
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"margin": self.margin})
+        return config
+
+    def call(self, inputs):
+        # inputs should be [anchor, positive, negative] embeddings
+        if not isinstance(inputs, list) or len(inputs) != 3:
+            raise ValueError(f"TripletLossLayer expects inputs as [anchor, positive, negative], got {inputs}")
+        
+        anchor, positive, negative = inputs
+        
+        # Compute distances
+        pos_dist = tf.reduce_sum(tf.square(anchor - positive), axis=1)
+        neg_dist = tf.reduce_sum(tf.square(anchor - negative), axis=1)
+        
+        # Triplet loss
+        basic_loss = pos_dist - neg_dist + self.margin
+        loss = tf.reduce_mean(tf.maximum(basic_loss, 0.0))
+        
+        # Add loss to layer
+        self.add_loss(loss)
+        
+        # Return anchor embeddings for model output
+        return anchor
+
+# Face recognition specific head for ArcFace loss
 class ArcFaceHead(layers.Layer):
     def __init__(self, num_classes, scale=30.0, margin=0.5, name=None, **kwargs):
         super(ArcFaceHead, self).__init__(name=name, **kwargs)
@@ -73,6 +109,7 @@ class ArcFaceHead(layers.Layer):
         
         return logits
 
+# Residual Block for ResNet
 class ResidualBlock(layers.Layer):
     def __init__(self, filters, kernel_size=3, stride=1, activation='relu', name=None, **kwargs):
         super(ResidualBlock, self).__init__(name=name, **kwargs)
@@ -116,35 +153,51 @@ class ResidualBlock(layers.Layer):
         x = self.bn3(x)
         return self.activation(x)
 
+# ResNet 18 with Multiple Training Paradigms
 class ResNetCustom(BaseModel):
-    """Custom implementation of ResNet architecture"""
+    """Custom implementation of ResNet architecture supporting supervised and metric learning"""
     
     def __init__(self, input_shape=(64, 64, 3), num_classes=10):
         super().__init__(input_shape, num_classes)
         self.is_inference_model = False
+        self.training_mode = 'supervised'  # 'supervised' or 'metric_learning'
         
-    def build(self, is_inference=False, is_acrf=False):
-        """Build the ResNet model architecture"""
+    def build(self, is_inference=False, training_mode='supervised', use_arcface=False):
+        """
+        Build the ResNet model architecture
+        
+        Args:
+            is_inference: If True, build model for inference (returns normalized features)
+            training_mode: 'supervised' for classification or 'metric_learning' for triplet/siamese
+            use_arcface: If True and training_mode='supervised', use ArcFace head
+        """
         self.is_inference_model = is_inference
-        inputs = layers.Input(shape=self.input_shape, name='input_1')
+        self.training_mode = training_mode
         
+        if training_mode == 'metric_learning':
+            return self._build_siamese_model(is_inference)
+        else:
+            return self._build_supervised_model(is_inference, use_arcface)
+    
+    def _build_backbone(self, input_tensor):
+        """Build the ResNet backbone (shared for all configurations)"""
         # Initial Conv Layer
-        x = layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same', activation='relu')(inputs)
+        x = layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same', activation='relu')(input_tensor)
         x = layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(x)
         
         # Residual Blocks
         # Stage 1
-        for _ in range(3):
+        for _ in range(2):
             x = ResidualBlock(64)(x)
         
         # Stage 2
         x = ResidualBlock(128, stride=2)(x)
-        for _ in range(3):
+        for _ in range(2):
             x = ResidualBlock(128)(x)
         
         # Stage 3
         x = ResidualBlock(256, stride=2)(x)
-        for _ in range(5):
+        for _ in range(2):
             x = ResidualBlock(256)(x)
         
         # Stage 4
@@ -154,90 +207,353 @@ class ResNetCustom(BaseModel):
         
         # Final Layers
         x = layers.GlobalAveragePooling2D()(x)
-        features = layers.Dense(512)(x)  # Feature embedding layer (512 dimensions)
+        features = layers.Dense(512, name='feature_embeddings')(x)  # Feature embedding layer (512 dimensions)
+        
+        return features
+    
+    def _build_supervised_model(self, is_inference=False, use_arcface=False):
+        """Build model for supervised learning (classification)"""
+        inputs = layers.Input(shape=self.input_shape, name='input_1')
+        features = self._build_backbone(inputs)
         
         if is_inference:
-            # For inference, only use the image input and return L2 normalized features
-            # L2 normalization is important for consistent similarity calculations in face recognition
+            # For inference, return L2 normalized features
             normalized_features = tf.nn.l2_normalize(features, axis=1, name='l2_normalization')
             self.model = models.Model(inputs=inputs, outputs=normalized_features, name="ResNetCustom_Inference")
         else:
-            # For training, use both image and label inputs
-            if is_acrf:
+            if use_arcface:
                 # Add ArcFace head for face recognition
-                # Create input for labels (to be used during training)
                 label_input = layers.Input(shape=(1,), name='label_input', dtype=tf.int32)
-                
                 outputs = ArcFaceHead(self.num_classes)([features, label_input])
-                
-                # Create model with two inputs: image and labels
-                self.model = models.Model(inputs=[inputs, label_input], outputs=outputs, name="ResNetCustom")
+                self.model = models.Model(inputs=[inputs, label_input], outputs=outputs, name="ResNetCustom_ArcFace")
             else:
-                # Normarl classification head
-                outputs = layers.Dense(self.num_classes)(x)
-                
+                # Normal classification head
+                outputs = layers.Dense(self.num_classes)(features)
                 outputs = layers.Activation('softmax')(outputs)
-                
                 self.model = models.Model(inputs=inputs, outputs=outputs, name="ResNetCustom_Classification")
-            
         
         return self.model
+    
+    def _build_siamese_model(self, is_inference=False):
+        """Build model for metric learning (Siamese/Triplet)"""
+        if is_inference:
+            # For inference, just return the embedding model
+            inputs = layers.Input(shape=self.input_shape, name='input_1')
+            features = self._build_backbone(inputs)
+            normalized_features = tf.nn.l2_normalize(features, axis=1, name='l2_normalization')
+            self.model = models.Model(inputs=inputs, outputs=normalized_features, name="ResNetCustom_Siamese_Inference")
+        else:
+            # For training, create triplet inputs
+            anchor_input = layers.Input(shape=self.input_shape, name='anchor_input')
+            positive_input = layers.Input(shape=self.input_shape, name='positive_input')
+            negative_input = layers.Input(shape=self.input_shape, name='negative_input')
+            
+            # Shared backbone
+            anchor_features = self._build_backbone(anchor_input)
+            positive_features = self._build_backbone(positive_input)
+            negative_features = self._build_backbone(negative_input)
+            
+            # L2 normalize embeddings
+            anchor_norm = tf.nn.l2_normalize(anchor_features, axis=1)
+            positive_norm = tf.nn.l2_normalize(positive_features, axis=1)
+            negative_norm = tf.nn.l2_normalize(negative_features, axis=1)
+            
+            # Triplet loss layer
+            output = TripletLossLayer(margin=0.5)([anchor_norm, positive_norm, negative_norm])
+            
+            self.model = models.Model(
+                inputs=[anchor_input, positive_input, negative_input], 
+                outputs=output, 
+                name="ResNetCustom_Triplet"
+            )
         
+        return self.model
+    
     @classmethod
     def load(cls, filepath):
         """
-        Load a ResNetCustom model from a file, handling the custom ResidualBlock and ArcFaceHead layers
-        
-        Args:
-            filepath: Path to the saved model
-            
-        Returns:
-            Loaded model instance
+        Load a ResNetCustom model from a file, handling custom layers
         """
-        # Create custom_objects dictionary with the custom layer classes
         custom_objects = {
             'ResidualBlock': ResidualBlock,
-            'ArcFaceHead': ArcFaceHead
+            'ArcFaceHead': ArcFaceHead,
+            'TripletLossLayer': TripletLossLayer
+        }
+        return super().load(filepath, custom_objects=custom_objects)
+    
+    def compile_model(self, learning_rate=0.001):
+        """Compile the model based on training mode"""
+        if self.model is None:
+            raise ValueError("Model not built yet. Call build() first.")
+        
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        
+        if self.training_mode == 'supervised':
+            if 'ArcFace' in self.model.name:
+                # For ArcFace, use sparse categorical crossentropy
+                self.model.compile(
+                    optimizer=optimizer,
+                    loss='sparse_categorical_crossentropy',
+                    metrics=['accuracy']
+                )
+            else:
+                # For normal classification
+                self.model.compile(
+                    optimizer=optimizer,
+                    loss='categorical_crossentropy',
+                    metrics=['accuracy']
+                )
+        else:  # metric_learning
+            # For triplet loss, loss is computed in the layer
+            self.model.compile(optimizer=optimizer)
+    
+    def compute_similarity(self, embedding1, embedding2, metric='cosine'):
+        """
+        Compute similarity between two embeddings
+        
+        Args:
+            embedding1: First embedding vector
+            embedding2: Second embedding vector
+            metric: 'cosine' or 'euclidean'
+            
+        Returns:
+            Similarity score
+        """
+        if metric == 'cosine':
+            # Cosine similarity
+            dot_product = tf.reduce_sum(embedding1 * embedding2, axis=1)
+            norm1 = tf.norm(embedding1, axis=1)
+            norm2 = tf.norm(embedding2, axis=1)
+            similarity = dot_product / (norm1 * norm2)
+            return similarity
+        
+        elif metric == 'euclidean':
+            # Euclidean distance (convert to similarity)
+            distance = tf.norm(embedding1 - embedding2, axis=1)
+            # Convert distance to similarity (closer = higher similarity)
+            similarity = 1.0 / (1.0 + distance)
+            return similarity
+        else:
+            raise ValueError("Metric must be 'cosine' or 'euclidean'")
+    
+    def evaluate_face_verification(self, verification_pairs, labels, metric='cosine', plot_roc=True):
+        """
+        Evaluate face verification performance using ROC curve and AUC
+        
+        Args:
+            verification_pairs: List of tuples (image1, image2) for verification
+            labels: List of ground truth labels (1 for same person, 0 for different)
+            metric: Similarity metric to use ('cosine' or 'euclidean')
+            plot_roc: Whether to plot ROC curve
+            
+        Returns:
+            Dictionary containing evaluation metrics
+        """
+        if self.model is None:
+            raise ValueError("Model not built yet. Call build() first.")
+        
+        if not self.is_inference_model:
+            raise ValueError("Use inference model for face verification evaluation")
+        
+        similarities = []
+        
+        print("Computing similarities for verification pairs...")
+        for i, (img1, img2) in enumerate(verification_pairs):
+            if i % 100 == 0:
+                print(f"Processing pair {i+1}/{len(verification_pairs)}")
+            
+            # Get embeddings
+            emb1 = self.model.predict(np.expand_dims(img1, axis=0), verbose=0)
+            emb2 = self.model.predict(np.expand_dims(img2, axis=0), verbose=0)
+            
+            # Compute similarity
+            sim = self.compute_similarity(emb1, emb2, metric=metric)
+            similarities.append(float(sim.numpy()))
+        
+        similarities = np.array(similarities)
+        labels = np.array(labels)
+        
+        # Compute ROC curve
+        fpr, tpr, thresholds = roc_curve(labels, similarities)
+        roc_auc = auc(fpr, tpr)
+        
+        # Find optimal threshold (Youden's index)
+        youden_index = tpr - fpr
+        optimal_idx = np.argmax(youden_index)
+        optimal_threshold = thresholds[optimal_idx]
+        
+        # Compute metrics at optimal threshold
+        predictions = (similarities >= optimal_threshold).astype(int)
+        accuracy = np.mean(predictions == labels)
+        
+        # True positive rate and false positive rate at optimal threshold
+        tpr_optimal = tpr[optimal_idx]
+        fpr_optimal = fpr[optimal_idx]
+        
+        # Compute precision and recall
+        true_positives = np.sum((predictions == 1) & (labels == 1))
+        false_positives = np.sum((predictions == 1) & (labels == 0))
+        false_negatives = np.sum((predictions == 0) & (labels == 1))
+        
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        results = {
+            'auc': roc_auc,
+            'optimal_threshold': optimal_threshold,
+            'accuracy': accuracy,
+            'tpr': tpr_optimal,
+            'fpr': fpr_optimal,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1_score,
+            'similarities': similarities,
+            'fpr_curve': fpr,
+            'tpr_curve': tpr,
+            'thresholds': thresholds
         }
         
-        # Use the parent class's load method with the custom_objects
-        return super().load(filepath, custom_objects=custom_objects)
+        print(f"\n=== Face Verification Results ({metric} similarity) ===")
+        print(f"AUC: {roc_auc:.4f}")
+        print(f"Optimal Threshold: {optimal_threshold:.4f}")
+        print(f"Accuracy: {accuracy:.4f}")
+        print(f"Precision: {precision:.4f}")
+        print(f"Recall: {recall:.4f}")
+        print(f"F1-Score: {f1_score:.4f}")
+        print(f"TPR: {tpr_optimal:.4f}")
+        print(f"FPR: {fpr_optimal:.4f}")
+        
+        if plot_roc:
+            self.plot_roc_curve(fpr, tpr, roc_auc, metric)
+        
+        return results
+    
+    def plot_roc_curve(self, fpr, tpr, auc_score, metric='cosine'):
+        """Plot ROC curve"""
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, color='darkorange', lw=2, 
+                label=f'ROC curve (AUC = {auc_score:.4f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random classifier')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title(f'ROC Curve for Face Verification ({metric} similarity)')
+        plt.legend(loc="lower right")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+    
+    def create_triplet_dataset(self, images, labels, batch_size=32):
+        """
+        Create triplet dataset for metric learning using sliding window strategy
+        
+        Args:
+            images: Array of images
+            labels: Array of corresponding labels
+            batch_size: Batch size for the dataset
+            
+        Returns:
+            TensorFlow dataset with triplets
+        """
+        # Pre-organize data by class for efficient access
+        class_indices = {}
+        unique_labels = np.unique(labels)
+        
+        for label in unique_labels:
+            class_indices[label] = np.where(labels == label)[0]
+        
+        def triplet_generator():
+            while True:
+                triplet_batch = []
+                
+                # For each class, create triplets using sliding window
+                for label in unique_labels:
+                    indices = class_indices[label]
+                    
+                    # Skip if class has less than 2 samples
+                    if len(indices) < 2:
+                        continue
+                    
+                    # Apply sliding window with size=2, stride=2
+                    for i in range(0, len(indices) - 1, 2):
+                        if i + 1 < len(indices):
+                            # Get anchor and positive from sliding window
+                            anchor_idx = indices[i]
+                            positive_idx = indices[i + 1]
+                            
+                            # Get all negative classes
+                            negative_labels = [l for l in unique_labels if l != label]
+                            if len(negative_labels) == 0:
+                                continue
+                            
+                            # Randomly select a negative class and then a random sample from that class
+                            negative_label = np.random.choice(negative_labels)
+                            negative_candidates = class_indices[negative_label]
+                            negative_idx = np.random.choice(negative_candidates)
+                            
+                            triplet_batch.append((anchor_idx, positive_idx, negative_idx))
+                            
+                            # Yield batch when we have enough triplets
+                            if len(triplet_batch) >= batch_size:
+                                for anchor_idx, positive_idx, negative_idx in triplet_batch[:batch_size]:
+                                    yield (
+                                        {
+                                            'anchor_input': images[anchor_idx],
+                                            'positive_input': images[positive_idx],
+                                            'negative_input': images[negative_idx]
+                                        },
+                                        images[anchor_idx]  # Dummy target (loss computed in layer)
+                                    )
+                                triplet_batch = triplet_batch[batch_size:]
+                
+                # Yield remaining triplets if any
+                if triplet_batch:
+                    for anchor_idx, positive_idx, negative_idx in triplet_batch:
+                        yield (
+                            {
+                                'anchor_input': images[anchor_idx],
+                                'positive_input': images[positive_idx],
+                                'negative_input': images[negative_idx]
+                            },
+                            images[anchor_idx]  # Dummy target (loss computed in layer)
+                        )
+        
+        dataset = tf.data.Dataset.from_generator(
+            triplet_generator,
+            output_signature=(
+                {
+                    'anchor_input': tf.TensorSpec(shape=self.input_shape, dtype=tf.float32),
+                    'positive_input': tf.TensorSpec(shape=self.input_shape, dtype=tf.float32),
+                    'negative_input': tf.TensorSpec(shape=self.input_shape, dtype=tf.float32)
+                },
+                tf.TensorSpec(shape=self.input_shape, dtype=tf.float32)
+            )
+        )
+        
+        return dataset.batch(1)  # Already batched in generator
     
     def evaluate(self, test_data, verbose=1):
         """
-        Evaluate the model on test data, handling both training and inference models
-        
-        Args:
-            test_data: Test dataset
-            verbose: Verbosity mode
-            
-        Returns:
-            Tuple of (loss, accuracy)
+        Evaluate the model on test data
         """
         if self.model is None:
             raise ValueError("Model not built yet. Call build() first.")
         
         if self.is_inference_model:
-            # For inference model, we can't directly evaluate accuracy
-            # This would need a custom evaluation approach
             raise ValueError("Cannot directly evaluate an inference model. Use the training model for evaluation.")
+        
+        if self.training_mode == 'metric_learning':
+            # For metric learning, evaluation is typically done through face verification
+            print("For metric learning models, use evaluate_face_verification() method instead.")
+            return None
         else:
-            # For training model with ArcFace, test_data should already be properly formatted
             return self.model.evaluate(test_data, verbose=verbose)
     
     def fit(self, train_data, validation_data=None, epochs=30, callbacks=None, class_weights=None):
         """
-        Train the model, handling both training and inference models
-        
-        Args:
-            train_data: Training dataset
-            validation_data: Validation dataset
-            epochs: Number of epochs to train
-            callbacks: List of callbacks to use during training
-            class_weights: Dictionary mapping class indices to weights for balanced training
-            
-        Returns:
-            Training history
+        Train the model
         """
         if self.model is None:
             raise ValueError("Model not built yet. Call build() first.")
@@ -245,7 +561,6 @@ class ResNetCustom(BaseModel):
         if self.is_inference_model:
             raise ValueError("Cannot train an inference model. Use a training model instead.")
         
-        # For training model with ArcFace, train_data should already be properly formatted
         return self.model.fit(
             train_data,
             validation_data=validation_data,
@@ -257,38 +572,29 @@ class ResNetCustom(BaseModel):
     
     def predict(self, input_data):
         """
-        Make predictions on input data, handling both training and inference models
-        
-        Args:
-            input_data: Input data to make predictions on. Can be images, 
-                        a tuple of (images, labels), or a dataset
-            
-        Returns:
-            Predictions: Face embeddings for inference model or class probabilities for training model
+        Make predictions on input data
         """
         if self.model is None:
             raise ValueError("Model not built yet. Call build() first.")
         
         if self.is_inference_model:
-            # For inference model, we only need the images
-            if isinstance(input_data, tuple) or isinstance(input_data, list):
-                # If it's a tuple/list of (images, labels), just use the images
-                images = input_data[0]
-                return self.model.predict(images)
-            else:
-                # It's just images or a dataset that yields images
-                return self.model.predict(input_data)
+            # For inference model, just return embeddings
+            return self.model.predict(input_data)
         else:
-            # For training model, we need both images and labels
-            if hasattr(input_data, 'map') and callable(getattr(input_data, 'map')):
-                # It's likely a dataset, let the model handle it
-                return self.model.predict(input_data)
-            elif isinstance(input_data, tuple) or isinstance(input_data, list):
-                # If it's already a tuple/list of (images, labels)
-                images, labels = input_data
-                return self.model.predict({'input_1': images, 'label_input': labels})
+            if self.training_mode == 'supervised':
+                if 'ArcFace' in self.model.name:
+                    # Handle ArcFace model with two inputs
+                    if isinstance(input_data, tuple) or isinstance(input_data, list):
+                        images, labels = input_data
+                        return self.model.predict({'input_1': images, 'label_input': labels})
+                    else:
+                        # Generate dummy labels for prediction
+                        batch_size = tf.shape(input_data)[0]
+                        dummy_labels = tf.zeros((batch_size, 1), dtype=tf.int32)
+                        return self.model.predict({'input_1': input_data, 'label_input': dummy_labels})
+                else:
+                    # Normal classification model
+                    return self.model.predict(input_data)
             else:
-                # Just images, generate dummy labels
-                batch_size = tf.shape(input_data)[0]
-                dummy_labels = tf.zeros((batch_size, 1), dtype=tf.int32)
-                return self.model.predict({'input_1': input_data, 'label_input': dummy_labels})
+                # For triplet model in training mode
+                return self.model.predict(input_data)

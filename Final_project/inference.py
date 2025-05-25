@@ -5,49 +5,59 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
-
 import random
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.resnet50 import preprocess_input
 
 from utils.data_collector import Datacollector
 from models import ResNetCustom
 
-def load_model(model_path):
+def load_model(model_path, model_type='supervised'):
     """
-    Load a trained model from path
+    Load a trained ResNet model from path
     
     Args:
         model_path: Path to the saved model (.h5 file)
+        model_type: Type of model ('supervised', 'metric_learning', 'inference')
         
     Returns:
-        Loaded model
+        Loaded ResNetCustom instance
     """
     print(f"Loading model from: {model_path}")
     try:
         # Import the custom layers needed
-        from models.resnet_custom import ResidualBlock, ArcFaceHead
+        from models.resnet_custom import ResidualBlock, ArcFaceHead, TripletLossLayer
         
         # Define the custom objects dictionary
         custom_objects = {
             'ResidualBlock': ResidualBlock,
-            'ArcFaceHead': ArcFaceHead
+            'ArcFaceHead': ArcFaceHead,
+            'TripletLossLayer': TripletLossLayer
         }
         
         # Load the model with custom objects
-        model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+        keras_model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
         print("Model loaded successfully")
-        return model
+        
+        # Create a ResNetCustom wrapper
+        resnet_model = ResNetCustom()
+        resnet_model.model = keras_model
+        resnet_model.is_inference_model = 'Inference' in keras_model.name
+        
+        if 'Triplet' in keras_model.name or 'Siamese' in keras_model.name:
+            resnet_model.training_mode = 'metric_learning'
+        else:
+            resnet_model.training_mode = 'supervised'
+        
+        return resnet_model
     except Exception as e:
         print(f"Error loading model: {e}")
         return None
 
 def evaluate_model(model, test_data, class_names):
     """
-    Evaluate the model on test data
+    Evaluate the ResNet model on test data
     
     Args:
-        model: Loaded model
+        model: Loaded ResNetCustom model
         test_data: Test dataset
         class_names: List of class names
         
@@ -56,13 +66,16 @@ def evaluate_model(model, test_data, class_names):
     """
     print("\nEvaluating model on test data...")
     
+    if model.training_mode == 'metric_learning':
+        print("For metric learning models, use face verification evaluation instead.")
+        return None
+    
     # Extract the test images and labels from the dataset
     all_images = []
     all_labels = []
     
     # Handle different dataset formats
     for batch in test_data:
-        # Check if the batch is a tuple or a dictionary (ArcFace format)
         if isinstance(batch, tuple):
             images, labels = batch
             if isinstance(images, dict) and 'input_1' in images:
@@ -73,33 +86,30 @@ def evaluate_model(model, test_data, class_names):
                 # Standard format
                 all_images.extend(images.numpy())
                 all_labels.extend(labels.numpy())
-        else:
-            raise ValueError("Unexpected dataset format")
     
     all_images = np.array(all_images)
     all_labels = np.array(all_labels)
-      # Evaluate the model
+    
+    # Evaluate the model
     print("Running predictions...")
     try:
-        # First try using the dataset directly (preferred approach)
-        predictions = model.predict(test_data)
+        # First try using the dataset directly
+        predictions = model.model.predict(test_data)
     except Exception as e:
         print(f"Error with dataset prediction: {e}")
         print("Trying alternative prediction approach...")
         
         # Check if model has multiple inputs (like ArcFace models)
-        if isinstance(model.input, list) or (hasattr(model.input, '_keras_shape') and len(model.input._keras_shape) > 1):
+        if 'ArcFace' in model.model.name:
             # Create dummy labels for ArcFace
             dummy_labels = np.zeros(len(all_images), dtype=np.int32)
             try:
-                # Try prediction with dictionary format
-                predictions = model.predict({'input_1': all_images, 'label_input': dummy_labels})
+                predictions = model.model.predict([all_images, dummy_labels])
             except Exception:
-                # Try with list format
-                predictions = model.predict([all_images, dummy_labels])
+                predictions = model.model.predict({'input_1': all_images, 'label_input': dummy_labels})
         else:
             # Standard prediction for regular models
-            predictions = model.predict(all_images)
+            predictions = model.model.predict(all_images)
     
     # Get predicted classes
     predicted_classes = np.argmax(predictions, axis=1)
@@ -162,19 +172,13 @@ def visualize_predictions(test_data, predictions, class_names, num_samples=16):
     for i in range(num_samples):
         plt.subplot(4, 4, i+1)
         
-        # For ResNet preprocess_input, we need to convert back for display
-        # ResNet preprocessing shifts the pixel values, adding the ImageNet mean back
+        # Normalize image for display
         img = images[i].copy()
         
-        # If using ResNet preprocessing (values outside 0-255 range)
-        if np.min(img) < 0 or np.max(img) > 255:
-            # Convert from ResNet preprocessing back to displayable image
-            # These values reverse the effects of the preprocess_input function
-            img = img + np.array([123.68, 116.779, 103.939])
-            img = img[...,::-1]  # BGR to RGB
-            img = np.clip(img, 0, 255).astype('uint8')
+        # Normalize to 0-255 range for display
+        if img.dtype == np.float32 or img.dtype == np.float64:
+            img = np.clip(img * 255, 0, 255).astype('uint8')
         else:
-            # Standard format, just convert to uint8
             img = img.astype('uint8')
         
         plt.imshow(img)
@@ -190,16 +194,15 @@ def visualize_predictions(test_data, predictions, class_names, num_samples=16):
     plt.savefig('saved_figures/prediction_samples.png')
     plt.show()
 
-def inference_single_samples(model, test_path, class_names, num_samples=3, use_arcface=False):
+def inference_single_samples(model, test_path, class_names, num_samples=3):
     """
     Perform inference on individual samples from the test folder
     
     Args:
-        model: Loaded model
+        model: Loaded ResNetCustom model
         test_path: Path to test data directory
         class_names: List of class names
         num_samples: Number of random samples to predict
-        use_arcface: Whether the model uses ArcFace format
     """
     
     print(f"\nPerforming inference on {num_samples} random samples...")
@@ -229,10 +232,11 @@ def inference_single_samples(model, test_path, class_names, num_samples=3, use_a
             file_paths.append(img_path)
             
             # Load and preprocess the image
-            img = image.load_img(img_path, target_size=(64, 64))
-            img_array = image.img_to_array(img)
+            img = tf.keras.utils.load_img(img_path, target_size=(64, 64))
+            img_array = tf.keras.utils.img_to_array(img)
             img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
-            processed_img = preprocess_input(img_array)
+            # Normalize to [0, 1] range
+            processed_img = img_array / 255.0
             
             sample_images.append(processed_img)
             true_labels.append(class_idx)
@@ -243,18 +247,13 @@ def inference_single_samples(model, test_path, class_names, num_samples=3, use_a
         
         # Make predictions
         try:
-            if use_arcface:
+            if 'ArcFace' in model.model.name:
                 # For ArcFace models
                 dummy_labels = np.zeros(len(sample_images), dtype=np.int32)
-                try:
-                    # Try prediction with dictionary format
-                    predictions = model.predict({'input_1': batch_images, 'label_input': dummy_labels})
-                except Exception:
-                    # Try with list format
-                    predictions = model.predict([batch_images, dummy_labels])
+                predictions = model.model.predict([batch_images, dummy_labels])
             else:
                 # Standard prediction
-                predictions = model.predict(batch_images)
+                predictions = model.model.predict(batch_images)
                 
             # Get predicted classes
             predicted_classes = np.argmax(predictions, axis=1)
@@ -265,7 +264,7 @@ def inference_single_samples(model, test_path, class_names, num_samples=3, use_a
                 plt.subplot(num_samples, 1, i + 1)
                 
                 # Load original image for display
-                img = image.load_img(file_paths[i], target_size=(64, 64))
+                img = tf.keras.utils.load_img(file_paths[i], target_size=(64, 64))
                 plt.imshow(img)
                 
                 # Color green for correct predictions, red for incorrect
@@ -297,20 +296,88 @@ def inference_single_samples(model, test_path, class_names, num_samples=3, use_a
     else:
         print("No sample images found in the test directory.")
 
+def evaluate_face_verification(model, verification_pairs_file, test_data_path, plot_roc=True):
+    """
+    Evaluate face verification performance using verification pairs
+    
+    Args:
+        model: Loaded ResNetCustom model (should be inference model)
+        verification_pairs_file: Path to verification pairs file
+        test_data_path: Path to test data directory
+        plot_roc: Whether to plot ROC curve
+    """
+    if not model.is_inference_model:
+        print("Converting to inference model for face verification...")
+        # Create inference version of the model
+        input_shape = model.model.input_shape[1:]  # Remove batch dimension
+        inference_model = ResNetCustom(input_shape=input_shape, num_classes=model.num_classes)
+        inference_model.build(is_inference=True, training_mode=model.training_mode)
+        
+        # Copy weights from training model to inference model
+        # This is a simplified approach - in practice you'd save/load the inference model
+        print("Note: For proper face verification, save and load an inference model")
+        return
+    
+    print("Loading verification pairs...")
+    verification_pairs = []
+    labels = []
+    
+    # Read verification pairs file
+    with open(verification_pairs_file, 'r') as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 3:  # Same person
+                person_id, img1, img2 = parts
+                img1_path = os.path.join(test_data_path, person_id, img1)
+                img2_path = os.path.join(test_data_path, person_id, img2)
+                verification_pairs.append((img1_path, img2_path))
+                labels.append(1)  # Same person
+            elif len(parts) == 4:  # Different persons
+                person1, img1, person2, img2 = parts
+                img1_path = os.path.join(test_data_path, person1, img1)
+                img2_path = os.path.join(test_data_path, person2, img2)
+                verification_pairs.append((img1_path, img2_path))
+                labels.append(0)  # Different persons
+    
+    print(f"Loaded {len(verification_pairs)} verification pairs")
+    
+    # Convert image paths to image arrays
+    image_pairs = []
+    for img1_path, img2_path in verification_pairs:
+        try:
+            # Load and preprocess images
+            img1 = tf.keras.utils.load_img(img1_path, target_size=(64, 64))
+            img1_array = tf.keras.utils.img_to_array(img1) / 255.0
+            
+            img2 = tf.keras.utils.load_img(img2_path, target_size=(64, 64))
+            img2_array = tf.keras.utils.img_to_array(img2) / 255.0
+            
+            image_pairs.append((img1_array, img2_array))
+        except Exception as e:
+            print(f"Error loading images {img1_path}, {img2_path}: {e}")
+            continue
+    
+    # Evaluate face verification
+    results = model.evaluate_face_verification(image_pairs, labels, plot_roc=plot_roc)
+    return results
+
 def main():
-    parser = argparse.ArgumentParser(description='Inference for image classification models')
-    parser.add_argument('--mode', type=int, default=0, choices=[0, 1],
-                        help='0: Testing mode (evaluate on test set), 1: Inference mode (predict individual samples)')
-    parser.add_argument('--model_path', type=str, default='model_factory/best_test_model.h5',
+    parser = argparse.ArgumentParser(description='Inference for ResNet models with multiple paradigms')
+    parser.add_argument('--mode', type=str, default='test', 
+                        choices=['test', 'inference', 'face_verification'],
+                        help='Mode: test (evaluate on test set), inference (predict samples), face_verification (ROC analysis)')
+    parser.add_argument('--model_path', type=str, default='model_factory/best_resnet_custom_supervised_model.h5',
                         help='Path to trained model file (.h5)')
     parser.add_argument('--test_path', type=str, default='data/classification_data/test_data',
                         help='Path to test data directory')
+    parser.add_argument('--verification_path', type=str, default='data/verification_data',
+                        help='Path to verification data directory (for face verification mode)')
+    parser.add_argument('--verification_pairs', type=str, default='data/verification_pairs_test.txt',
+                        help='Path to verification pairs file (for face verification mode)')
     parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size for inference')
-    parser.add_argument('--use_arcface', action='store_true',
-                        help='Enable if the model was trained with ArcFace')
-    parser.add_argument('--num_samples', type=int, default=3,
-                        help='Number of samples for inference mode (mode 1)')
+    parser.add_argument('--num_samples', type=int, default=5,
+                        help='Number of samples for inference mode')
     
     args = parser.parse_args()
     
@@ -322,48 +389,83 @@ def main():
     # Create directory for saved figures if it doesn't exist
     if not os.path.exists('saved_figures'):
         os.makedirs('saved_figures')
-      # Initialize DataCollector and load data
-    data = Datacollector(test_path=args.test_path)
     
-    # Always load at least a small batch of data to get class names
-    _, _, test_ds = data.load_data(
-        batch_size=args.batch_size,
-        use_arcface=args.use_arcface
-    )
-    
-    # Get class names
-    class_names = data.get_class_names()
-    if not class_names:
-        print("Error: Unable to get class names from the data.")
-        return
-    
-    print(f"Found {len(class_names)} classes: {class_names}")
+    print(f"Running in {args.mode} mode")
     
     # Load the model
     model = load_model(args.model_path)
     if model is None:
         return
     
-    # Print model summary
-    model.summary()
+    print(f"Model type: {model.training_mode}")
+    print(f"Is inference model: {model.is_inference_model}")
     
-    # Run in the selected mode
-    if args.mode == 0:
-        # Testing mode: Evaluate on test dataset
-        print("\nRunning in Testing Mode (evaluate on test set)")
-        accuracy, predictions = evaluate_model(model, test_ds, class_names)
-        print(f"\nTesting completed. Results saved to 'saved_figures/' directory.")
-    else:
-        # Inference mode: Predict individual samples
-        print("\nRunning in Inference Mode (predict individual samples)")
-        inference_single_samples(
-            model=model, 
-            test_path=args.test_path, 
-            class_names=class_names, 
-            num_samples=args.num_samples,
-            use_arcface=args.use_arcface
+    # Print model summary
+    model.model.summary()
+    
+    if args.mode == 'face_verification':
+        # Face verification mode (for metric learning models)
+        if not model.is_inference_model:
+            print("Warning: Face verification works best with inference models")
+        
+        evaluate_face_verification(
+            model, 
+            args.verification_pairs, 
+            args.verification_path,
+            plot_roc=True
         )
-        print(f"\nInference completed. Results saved to 'saved_figures/' directory.")
+        
+    elif args.mode == 'test':
+        # Testing mode: Evaluate on test dataset (for supervised models)
+        if model.training_mode != 'supervised':
+            print("Test mode is only available for supervised models")
+            return
+            
+        # Initialize DataCollector and load data
+        data_collector = Datacollector(test_path=args.test_path)
+        
+        # Determine if model uses ArcFace
+        use_arcface = 'ArcFace' in model.model.name
+        
+        _, _, test_ds = data_collector.load_data(
+            batch_size=args.batch_size,
+            use_arcface=use_arcface
+        )
+        
+        # Get class names
+        class_names = data_collector.get_class_names()
+        if not class_names:
+            print("Error: Unable to get class names from the data.")
+            return
+        
+        print(f"Found {len(class_names)} classes: {class_names}")
+        
+        # Evaluate model
+        accuracy, predictions = evaluate_model(model, test_ds, class_names)
+        
+        # Visualize some predictions
+        visualize_predictions(test_ds, predictions, class_names)
+        
+        print(f"\nTesting completed. Results saved to 'saved_figures/' directory.")
+        
+    else:  # inference mode
+        # Inference mode: Predict individual samples
+        if model.training_mode != 'supervised':
+            print("Inference mode is only available for supervised models")
+            return
+            
+        # Get class names from directory structure
+        class_names = [d for d in os.listdir(args.test_path) 
+                      if os.path.isdir(os.path.join(args.test_path, d))]
+        class_names.sort()
+        
+        if not class_names:
+            print("Error: No class directories found in test path")
+            return
+            
+        print(f"Found {len(class_names)} classes: {class_names}")
+        
+        inference_single_samples(model, args.test_path, class_names, args.num_samples)
 
 if __name__ == "__main__":
     main()
