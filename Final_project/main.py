@@ -14,6 +14,109 @@ from face_modules.check_in_system import process_check_in, process_registration
 import threading
 import time
 import platform
+import tensorflow as tf
+
+# Emotion detection functions
+def load_emotion_model():
+        """
+        Source: https://www.analyticsvidhya.com/blog/2021/11/facial-emotion-detection-using-cnn/
+        Load the emotion detection model
+        """
+        model_path = os.path.join('model_factory', 'face_model.h5')
+        abs_path = os.path.abspath(model_path)
+        print(f"Attempting to load emotion model from: {abs_path}")
+        print(f"File exists: {os.path.exists(abs_path)}, Size: {os.path.getsize(abs_path) if os.path.exists(abs_path) else 'N/A'} bytes")
+        
+        try:
+            # First, try loading with default parameters
+            print("Loading model with default parameters...")
+            model = tf.keras.models.load_model(model_path)
+            print(f"Emotion detection model loaded successfully from {model_path}")
+            return model
+        except Exception as e:
+            print(f"Error loading emotion model with default parameters: {str(e)}")
+            
+            try:
+                # Second attempt: try loading with compile=False
+                print("Trying to load model with compile=False...")
+                model = tf.keras.models.load_model(model_path, compile=False)
+                print("Model loaded successfully with compile=False")
+                return model
+            except Exception as e2:
+                print(f"Error in second attempt: {str(e2)}")
+                
+                try:
+                    # Third attempt: try custom objects
+                    print("Trying to load model with custom_objects...")
+                    model = tf.keras.models.load_model(model_path, compile=False, 
+                                                      custom_objects={'tf': tf})
+                    print("Model loaded successfully with custom_objects")
+                    return model
+                except Exception as e3:
+                    print(f"All attempts to load model failed. Final error: {str(e3)}")
+                    return None
+
+def preprocess_face_for_emotion(face_img, target_size=(48, 48)):
+    """Preprocess face image for emotion detection model"""
+    if face_img is None or face_img.size == 0:
+        return None
+    
+    # Convert to grayscale
+    gray_face = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+    
+    # Resize to target size (usually 48x48 for emotion detection models)
+    resized_face = cv2.resize(gray_face, target_size)
+    
+    # Normalize pixel values to [0, 1]
+    normalized_face = resized_face / 255.0
+    
+    # Reshape for model input (add batch and channel dimensions)
+    processed_face = normalized_face.reshape(1, target_size[0], target_size[1], 1)
+    
+    return processed_face
+
+def detect_emotion(model, face_img):
+    """Detect emotion in a face image"""
+    if model is None:
+        print("Cannot detect emotion: Model is None")
+        return "Unknown"
+    
+    if face_img is None or face_img.size == 0:
+        print("Cannot detect emotion: Face image is None or empty")
+        return "Unknown"
+        
+    print(f"Face image shape for emotion detection: {face_img.shape}")
+    
+    # Emotion labels
+    emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+    
+    # Preprocess face
+    processed_face = preprocess_face_for_emotion(face_img)
+    if processed_face is None:
+        print("Preprocessing failed for emotion detection")
+        return "Unknown"
+        
+    print(f"Processed face shape: {processed_face.shape}, Range: {processed_face.min():.2f} to {processed_face.max():.2f}")
+    
+    # Predict emotion
+    try:
+        print("Attempting emotion prediction...")
+        prediction = model.predict(processed_face, verbose=0)
+        print(f"Prediction raw output: {prediction}")
+        max_index = np.argmax(prediction)
+        emotion = emotion_labels[max_index]
+        confidence = prediction[0][max_index] * 100
+        result = f"{emotion} ({confidence:.1f}%)"
+        print(f"Detected emotion: {result}")
+        return result
+    except Exception as e:
+        print(f"Error predicting emotion: {e}")
+        import traceback
+        traceback.print_exc()
+        return "Unknown"
+
+# Initialize emotion detection model
+emotion_model = load_emotion_model()
 
 class FaceRecognitionApp:
     def __init__(self, root):
@@ -101,6 +204,10 @@ class FaceRecognitionApp:
         ttk.Label(status_frame, text="Check-In Result:").pack(anchor=tk.W, padx=5, pady=2)
         self.checkin_result_label = ttk.Label(status_frame, text="-")
         self.checkin_result_label.pack(anchor=tk.W, padx=5, pady=2)
+        
+        ttk.Label(status_frame, text="Emotion:").pack(anchor=tk.W, padx=5, pady=2)
+        self.emotion_label = ttk.Label(status_frame, text="-")
+        self.emotion_label.pack(anchor=tk.W, padx=5, pady=2)
         
         # Set layout weights
         main_frame.columnconfigure(0, weight=3)
@@ -254,9 +361,24 @@ class FaceRecognitionApp:
                         # Update GUI labels
                         self.root.after(0, self.update_status_labels, eye_result, recognition_result, check_in_result)
                     except Exception as e:
-                        print(f"Error in check-in processing: {e}")
                         # Just display the frame without processing
+                        print(f"Error in check-in processing: {e}")
                         self.root.after(0, self.update_status_labels, f"Error: {str(e)}", "Processing failed", "")
+                
+                # Emotion detection
+                if len(sections) > 0:
+                    for rect, label in sections:
+                        x1, y1, x2, y2 = rect
+                        # Crop the face from the frame
+                        face_img = self.frame[y1:y2, x1:x2]
+                        # Detect emotion
+                        emotion_result = detect_emotion(emotion_model, face_img)
+                        # Update the emotion label
+                        self.root.after(0, self.update_emotion_label, emotion_result)
+                        break  # Only process the first face for emotion
+                else:
+                    # Clear emotion label if no face detected
+                    self.root.after(0, self.update_emotion_label, "-")
                 
                 # Display the frame (for both check-in and registration modes)
                 self.root.after(0, self.display_frame, self.frame, sections)
@@ -277,6 +399,12 @@ class FaceRecognitionApp:
                 x1, y1, x2, y2 = rect
                 cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(frame_copy, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Add emotion label below the face if we have one
+                if self.emotion_label and self.emotion_label.cget("text") not in ["-", ""]:
+                    emotion_text = self.emotion_label.cget("text")
+                    cv2.putText(frame_copy, emotion_text, (x1, y2+20), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             
             # Convert to PIL format for Tkinter
             rgb_frame = cv2.cvtColor(frame_copy, cv2.COLOR_BGR2RGB)
@@ -316,12 +444,25 @@ class FaceRecognitionApp:
             # Show result
             self.checkin_result_label.config(text=result, foreground="green")
             
+            # Detect emotion in the registered face
+            if sections:
+                rect, label = sections[0]
+                x1, y1, x2, y2 = rect
+                face_img = self.frame[y1:y2, x1:x2]
+                emotion_result = detect_emotion(emotion_model, face_img)
+                self.update_emotion_label(emotion_result)
+            
             # Display the annotated frame with the registered face
             if sections and self.frame is not None:
                 self.display_frame(self.frame, sections)
                 
         except Exception as e:
             self.show_error(f"Registration failed: {str(e)}")
+    
+    def update_emotion_label(self, emotion_result):
+        """Update the emotion label with the detected emotion"""
+        if self.emotion_label:
+            self.emotion_label.config(text=emotion_result)
     
     def show_error(self, message):
         """Display an error message"""
@@ -354,14 +495,17 @@ def main():
     model_dir = 'model_factory'
     landmark_file = os.path.join(model_dir, 'shape_predictor_68_face_landmarks.dat')
     embedding_file = os.path.join(model_dir, 'new_models' ,'embedding_euclidean.keras')
+    emotion_model_file = os.path.join(model_dir, 'face_model.h5')
     
     missing_files = []
     if not os.path.isfile(landmark_file):
         missing_files.append(landmark_file)
     if not os.path.isfile(embedding_file):
         missing_files.append(embedding_file)
+    if not os.path.isfile(emotion_model_file):
+        missing_files.append(emotion_model_file)
         
-    if missing_files:
+    if missing_files:   
         print("ERROR: The following required model files are missing:")
         for file in missing_files:
             print(f"  - {file}")
