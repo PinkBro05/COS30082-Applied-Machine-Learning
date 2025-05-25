@@ -353,7 +353,7 @@ def main():
     # Check if required model files exist
     model_dir = 'model_factory'
     landmark_file = os.path.join(model_dir, 'shape_predictor_68_face_landmarks.dat')
-    embedding_file = os.path.join(model_dir, 'embedding_euclidean.keras')
+    embedding_file = os.path.join(model_dir, 'new_models' ,'embedding_euclidean.keras')
     
     missing_files = []
     if not os.path.isfile(landmark_file):

@@ -17,21 +17,6 @@ def distance(emb1, emb2):
     """
     return np.sum(np.square(emb1 - emb2))
 
-def normalize_embedding(embedding):
-    """
-    Normalize an embedding vector to unit length.
-    
-    Args:
-        embedding: The embedding vector to normalize
-        
-    Returns:
-        Normalized embedding vector with unit length
-    """
-    norm = np.linalg.norm(embedding)
-    if norm > 0:
-        return embedding / norm
-    return embedding
-
 def eye_aspect_ratio(eye):
     """
     Calculate the eye aspect ratio for blink detection.

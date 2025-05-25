@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 import os
-from face_modules.utils.math_utils import distance, normalize_embedding
+from face_modules.utils.math_utils import distance
 from face_modules.config import (
     FACE_EMBEDDING_MODEL_PATH, 
     FACE_RECOGNITION_THRESHOLD,
@@ -62,9 +62,6 @@ def get_face_embedding(face_image):
     # Extract embedding
     embedding = embedding_model(np.expand_dims(preprocessed_face, axis=0)).numpy()[0]
     
-    # Normalize the embedding to unit length
-    embedding = normalize_embedding(embedding)
-    
     return embedding
 
 def recognize_face(face_embedding):
@@ -89,15 +86,8 @@ def recognize_face(face_embedding):
     except FileNotFoundError:
         print("No stored embeddings or names found.")
         return False, "", float('inf')
-
-    # Normalize input embedding (in case it wasn't already)
-    face_embedding = normalize_embedding(face_embedding)
     
-    # Compare with stored embeddings
-    # First normalize all stored embeddings
-    normalized_embeddings = np.array([normalize_embedding(emb) for emb in embeddings])
-    
-    distances = np.array([distance(face_embedding, emb) for emb in normalized_embeddings])
+    distances = np.array([distance(face_embedding, emb) for emb in embeddings])
     min_distance = np.min(distances)
     min_index = np.argmin(distances)
     min_name = names[min_index]
@@ -121,8 +111,6 @@ def register_new_face(face_embedding, name):
     Returns:
         Success status
     """
-    # Normalize embedding before storing
-    face_embedding = normalize_embedding(face_embedding)
     
     # Check if the embedding file exists
     try:

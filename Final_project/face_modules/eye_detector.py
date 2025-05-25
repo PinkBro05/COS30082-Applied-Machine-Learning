@@ -56,18 +56,3 @@ def check_eye_status(image, face_detection):
     else:
         return "eyes_closed", ear
 
-def visualize_eyes(image, left_eye, right_eye):
-    """
-    Create a visualization of the eye landmarks.
-    
-    Args:
-        image: Input image
-        left_eye: Left eye landmarks
-        right_eye: Right eye landmarks
-        
-    Returns:
-        Annotated image with eye landmarks
-    """
-    # Implementation for visualization
-    # This is a placeholder - you can implement this based on your needs
-    pass
