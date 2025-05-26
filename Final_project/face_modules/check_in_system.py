@@ -69,7 +69,7 @@ def process_check_in(image, state):
     # Handle recognized face
     if face_min_name == state["last_face"]:
         state["taken_actions"].add(eye_action)
-          # Check if both eye states have been observed (blink detection)
+        # Check if both eye states have been observed (blink detection)
         if len(state["taken_actions"]) == 2:
             # Anti-spoofing passed - show the name
             return (
